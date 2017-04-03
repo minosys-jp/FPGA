@@ -1,4 +1,4 @@
-# the VGA Implementation
+# The VGA Implementation
 
 Implemented the legacy VGA for the Zybo.
 
