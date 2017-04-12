@@ -2,7 +2,7 @@ The "draw_fifo" IP package requires the FIFO IP.
 The zip file contains all files to define the internal FIFO
 (Don't confuse the external interface.)
 
-To construct the "draw_info", please expand the zip file first,
+To construct the "draw_fifo", please expand the zip file first,
 and specify the directory on the "IP Setting".
 
 The internal FIFO defines 512 entries, each entry has 4 bytes long,
