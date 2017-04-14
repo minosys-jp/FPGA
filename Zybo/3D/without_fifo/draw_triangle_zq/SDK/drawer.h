@@ -8,11 +8,15 @@
 #ifndef SRC_DRAWER_H_
 #define SRC_DRAWER_H_
 
+typedef struct Surface {
+	int v[3];
+	unsigned short c[3];
+} Surface;
+
 typedef struct Polygons {
 	int nVertex, nSurface;	// number of vertexes, number of surfaces
 	float *vertexes;		// (n * 3: x, n * 3 + 1: y, n * 3 + 2: z)
-	int *surfaces;			// (n * 3: vertex1, n * 3 + 1: vertex2, n * 3 + 2: vertex3)
-	unsigned short *colors;	// (n * 3: color1, n * 3 + 1: color2, n * 3 + 2: color3)
+	Surface *surfaces;
 } Polygons;
 
 extern unsigned short *gVram[2];
