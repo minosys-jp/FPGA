@@ -11,7 +11,7 @@
 
 		// Parameters of Axi Slave Bus Interface S00_AXI
 		parameter integer C_S00_AXI_DATA_WIDTH	= 32,
-		parameter integer C_S00_AXI_ADDR_WIDTH	= 1
+		parameter integer C_S00_AXI_ADDR_WIDTH	= 3
 	)
 	(
 		// Users to add ports here
@@ -26,6 +26,8 @@
 		output wire ap_rstn,
 		output wire ap_start,
 		input wire ap_done,
+		input wire ap_ready,
+		input wire ap_idle,
 		// User ports ends
 		// Do not modify the ports beyond this line
 
@@ -70,6 +72,8 @@
 		.ap_rstn(ap_rstn),
 		.ap_start(ap_start),
 		.ap_done(ap_done),
+		.ap_ready(ap_ready),
+		.ap_idle(ap_idle),
 		// user port end
 		.S_AXI_ACLK(s00_axi_aclk),
 		.S_AXI_ARESETN(s00_axi_aresetn),

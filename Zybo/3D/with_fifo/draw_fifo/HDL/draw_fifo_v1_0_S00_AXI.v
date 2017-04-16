@@ -11,7 +11,7 @@
 		// Width of S_AXI data bus
 		parameter integer C_S_AXI_DATA_WIDTH	= 32,
 		// Width of S_AXI address bus
-		parameter integer C_S_AXI_ADDR_WIDTH	= 1
+		parameter integer C_S_AXI_ADDR_WIDTH	= 3
 	)
 	(
 		// Users to add ports here
@@ -24,8 +24,10 @@
 		output reg [15:0] c2,
 		output reg [15:0] c3,
 		output wire ap_rstn,
-		output reg ap_start,
+		output wire ap_start,
 		input wire ap_done,
+		input wire ap_ready,
+		input wire ap_idle,
 		// User ports ends
 		// Do not modify the ports beyond this line
 
@@ -113,33 +115,45 @@
 	//-- Signals for user logic register space example
 	//------------------------------------------------
 	//-- Number of Slave Registers 2
-	reg [31:0]	slv_rstn;
+	reg 	slv_rstn = 'b0;
 	wire	 slv_reg_rden;
 	wire	 slv_reg_wren;
 	reg [C_S_AXI_DATA_WIDTH-1:0]	 reg_data_out;
 	wire 	fifo_empty;
 	wire	fifo_full;
-	reg	fifo_ren = 'b0;
-	reg fifo_ren2 = 'b0;
+	wire	ren;
+	reg	fifo_ren2 = 'b0;
 	reg [2:0] state = 3'h0;
 	wire [31:0] fifo_dout;
 	reg [31:0] x1y1PreLoad = 32'h0;
 	reg [31:0] x2y2PreLoad = 32'h0;
 	reg [31:0] x3c1PreLoad = 32'h0;
 	reg [31:0] c2c3PreLoad = 32'h0;
-    reg fifo_next;
+	reg fifo_next;
+	reg fifo_start = 'b0;
+	reg fifo_busy = 'b0;
+	reg fifo_prefetch = 'b0;
     	
-	// control FIFO
+	assign ap_start = fifo_start && (~ap_ready || (state == 3'd4));
+
 	always @(posedge S_AXI_ACLK) begin
-	    fifo_ren2 <= fifo_ren && ~fifo_empty;
-		fifo_ren <= (state < 3'h4);
-	    fifo_next <= ap_done && fifo_empty && (state == 4'd0) && ~ap_start;
+		if (ap_start)
+			fifo_busy <= 'b1;
+		else if (ap_ready)
+			fifo_busy <= 'b0;
+	end
+
+	// control FIFO
+	assign ren = (state < 3'd4);
+	always @(posedge S_AXI_ACLK) begin
+		fifo_ren2 <= ren & ~fifo_empty;
+		fifo_next <= ap_idle && fifo_empty && (state == 4'd0) && ~fifo_start;
 	end
 
 	// load register until state == 3'h4
 	// preStart means shift register is 'full'
 	always @(posedge S_AXI_ACLK) begin
-		if (~slv_rstn[31]) begin
+		if (~slv_rstn) begin
 			x1 <= x1;
 			y1 <= y1;
 			x2 <= x2;
@@ -153,26 +167,36 @@
 			x3c1PreLoad <= x3c1PreLoad;
 			c2c3PreLoad <= c2c3PreLoad;
 			state <= 3'h0;
-			ap_start <= 'b0;
+			fifo_start <= 'b0;
+			fifo_prefetch <= 'b0;
 		end
                 else if (state == 3'h4) begin
-			if (ap_done) begin
+			if (~fifo_start || ap_ready) begin
 				// draw parameter loaded and the engine is ready
-				x1 <= x1y1PreLoad[31:16];
-				y1 <= x1y1PreLoad[15:0];
-				x2 <= x2y2PreLoad[31:16];
-				y2 <= x2y2PreLoad[15:0];
-				x3 <= x3c1PreLoad[31:16];
-				c1 <= x3c1PreLoad[15:0];
-				c2 <= c2c3PreLoad[31:16];
-				c3 <= c2c3PreLoad[15:0];
-				x1y1PreLoad <= x1y1PreLoad;
+				x1 <= x1y1PreLoad[15:0];
+				y1 <= x1y1PreLoad[31:16];
+				x2 <= x2y2PreLoad[15:0];
+				y2 <= x2y2PreLoad[31:16];
+				x3 <= x3c1PreLoad[15:0];
+				c1 <= x3c1PreLoad[31:16];
+				c2 <= c2c3PreLoad[15:0];
+				c3 <= c2c3PreLoad[31:16];
 				x2y2PreLoad <= x2y2PreLoad;
 				x3c1PreLoad <= x3c1PreLoad;
 				c2c3PreLoad <= c2c3PreLoad;
+				fifo_prefetch <= fifo_prefetch;
 				// start the engine
-				ap_start <= 'b1;
-				state <= 3'h0;
+				fifo_start <= 'b1;
+				if (fifo_prefetch) begin
+					// next data prefetched
+					x1y1PreLoad <= fifo_dout;
+					state <= 3'h1;
+				end
+				else begin
+					// next not ready
+					x1y1PreLoad <= x1y1PreLoad;
+					state <= 3'h0;
+				end
 			end
 			else begin
 				// wait for the engine done
@@ -188,31 +212,12 @@
 				x2y2PreLoad <= x2y2PreLoad;
 				x3c1PreLoad <= x3c1PreLoad;
 				c2c3PreLoad <= c2c3PreLoad;
-				ap_start <= 'b0;
+				fifo_prefetch <= fifo_prefetch;
+				fifo_start <= fifo_start;
 				state <= state;
 			end
 		end
-		else if (fifo_ren2) begin
-			// fifo can be read; load a word
-			x1 <= x1;
-			y1 <= y1;
-			x2 <= x2;
-			y2 <= y2;
-			x3 <= x3;
-			c1 <= c1;
-			c2 <= c2;
-			c3 <= c3;
-			// shift registers
-			x1y1PreLoad <= x2y2PreLoad;
-			x2y2PreLoad <= x3c1PreLoad;
-			x3c1PreLoad <= c2c3PreLoad;
-			c2c3PreLoad <= fifo_dout;
-			// update the regsiter count
-			state <= state + 3'h1;
-			ap_start <= 'b0;
-		end
 		else begin
-			// wait fifo for next data
 			x1 <= x1;
 			y1 <= y1;
 			x2 <= x2;
@@ -221,17 +226,70 @@
 			c1 <= c1;
 			c2 <= c2;
 			c3 <= c3;
-			x1y1PreLoad <= x1y1PreLoad;
-			x2y2PreLoad <= x2y2PreLoad;
-			x3c1PreLoad <= x3c1PreLoad;
-			c2c3PreLoad <= c2c3PreLoad;
-			state <= state;
-			ap_start <= 'b0;
+			fifo_start <= ap_ready ? 'b0 : fifo_start;
+			if (fifo_ren2) begin
+				// fifo can be read; load a word
+				// shift registers
+				case (state)
+					3'd0:
+						begin
+							x1y1PreLoad <= fifo_dout;
+							x2y2PreLoad <= x2y2PreLoad;
+							x3c1PreLoad <= x3c1PreLoad;
+							c2c3PreLoad <= c2c3PreLoad;
+							fifo_prefetch <= 'b0;
+						end
+					3'd1:
+						begin
+							x1y1PreLoad <= x1y1PreLoad;
+							x2y2PreLoad <= fifo_dout;
+							x3c1PreLoad <= x3c1PreLoad;
+							c2c3PreLoad <= c2c3PreLoad;
+							fifo_prefetch <= 'b0;
+						end
+					3'd2:
+						begin
+							x1y1PreLoad <= x1y1PreLoad;
+							x2y2PreLoad <= x2y2PreLoad;
+							x3c1PreLoad <= fifo_dout;
+							c2c3PreLoad <= c2c3PreLoad;
+							fifo_prefetch <= 'b0;
+						end
+					3'd3:
+						begin
+							x1y1PreLoad <= x1y1PreLoad;
+							x2y2PreLoad <= x2y2PreLoad;
+							x3c1PreLoad <= x3c1PreLoad;
+							c2c3PreLoad <= fifo_dout;
+							fifo_prefetch <= ~fifo_empty;
+						end
+					default:
+						begin
+							x1y1PreLoad <= x1y1PreLoad;
+							x2y2PreLoad <= x2y2PreLoad;
+							x3c1PreLoad <= x3c1PreLoad;
+							c2c3PreLoad <= c2c3PreLoad;
+							fifo_prefetch <= fifo_prefetch;
+						end
+				endcase
+				// update the regsiter count
+				state <= state + 3'h1;
+			end
+			else begin
+				// wait for next data
+				x1y1PreLoad <= x1y1PreLoad;
+				x2y2PreLoad <= x2y2PreLoad;
+				x3c1PreLoad <= x3c1PreLoad;
+				c2c3PreLoad <= c2c3PreLoad;
+				fifo_start <= ap_ready ? 'b0 : fifo_start;
+				fifo_prefetch <= fifo_prefetch;
+				state <= state;
+			end
 		end
 	end
 
 	// I/O Connections assignments
-	assign ap_rstn		= slv_rstn[31];
+	assign ap_rstn		= slv_rstn;
 	assign S_AXI_AWREADY	= axi_awready;
 	assign S_AXI_WREADY	= axi_wready;
 	assign S_AXI_BRESP	= axi_bresp;
@@ -332,13 +390,14 @@
 	begin
 	  if ( S_AXI_ARESETN == 1'b0 )
 	    begin
-	      slv_rstn <= 0;
+	      slv_rstn <= 'b0;
 	    end
 	  else
 	    if (slv_reg_wren
              && (axi_awaddr[2] == 1'h1)
+	     && (S_AXI_WSTRB[3] == 'b1)
              ) begin
-		slv_rstn <= S_AXI_WDATA;
+		slv_rstn <= S_AXI_WDATA[31];
 	    end
 	end    
 
@@ -443,9 +502,15 @@
 	always @(*)
 	begin
 	      // Address decoding for reading registers
-	      case ( axi_araddr[2] )
-	        'h0   : reg_data_out <= {30'h0, fifo_full, fifo_next};
-	        'h1   : reg_data_out <= slv_rstn;
+	      case ( axi_araddr[4:2] )
+	        3'h0   : reg_data_out <= {30'h0, fifo_full, fifo_next};
+	        3'h1   : reg_data_out <= {slv_rstn, ap_start, fifo_busy, 25'h0, ap_idle, state};
+		3'h2   : reg_data_out <= {y1, x1};
+		3'h3   : reg_data_out <= x1y1PreLoad;
+		3'h4   : reg_data_out <= {y2, x2};
+		3'h5   : reg_data_out <= x2y2PreLoad;
+		3'h6   : reg_data_out <= {c1, x3};
+		3'h7   : reg_data_out <= x3c1PreLoad;
 	        default : reg_data_out <= 0;
 	      endcase
 	end
@@ -471,11 +536,11 @@
 
 	// Add user logic here
 	draw_fifo draw_fifo (
-		.srst	(~slv_rstn[31]),
+		.srst	(~slv_rstn),
 		.clk	(S_AXI_ACLK),
 		.din	(S_AXI_WDATA),
 		.wr_en	(fifo_wen),
-		.rd_en	(fifo_ren),
+		.rd_en	(ren),
 		.dout	(fifo_dout),
 		.full	(fifo_full),
 		.empty	(fifo_empty)
